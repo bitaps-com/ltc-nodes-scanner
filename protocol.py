@@ -15,8 +15,13 @@ import traceback
 
 
 
+PROTOCOL_VERSION = 70015
+USER_AGENT = "/bitnodes.earn.com:0.1/"
+SERVICES=1
+MAX_UINT64=18446744073709551615
+
 class BitcoinProtocol():
-    def __init__(self, ip, port, settings,logging):
+    def __init__(self, ip, port, settings,logging, loop, address_handler=None):
         self.MAGIC = settings["MAGIC"]
         self.PING_TIMEOUT = settings["PING_TIMEOUT"]
         self.HANDSHAKE_TIMEOUT = settings["HANDSHAKE_TIMEOUT"]
@@ -27,11 +32,12 @@ class BitcoinProtocol():
             b"pong": self.pong,
             b"verack": self.verack,
             b"version": self.version_rcv,
-            b"getaddr": self.getaddr_request
+            b"getaddr": self.getaddr_request,
+            b"addr": self.address
 
         }
 
-
+        self.address_handler=address_handler
         self.recv = 0
         self.sent = 0
         self.verack = False
@@ -55,6 +61,7 @@ class BitcoinProtocol():
         self.relay = False
         self.raw_version = False
         self.getaddr_timestamp = 0
+        self.loop=loop
 
         self.ip = ip
         self.ips = str(ip)
@@ -98,14 +105,16 @@ class BitcoinProtocol():
 
         self.services = int.from_bytes(data[4:12], byteorder='little')
         self.timestamp = int.from_bytes(data[12:20], byteorder='little')
-        try:
-            self.addr_recv = NetworkAddress.from_raw(b'0000' + data[20:46])
-            self.addr_from = NetworkAddress.from_raw(b'0000' + data[46:72])
-        except:
-            self.log.error('protocol verson decode address error')
-            self.handshake.cancel()
-            return -1
-        str_len, int_len = var_int(data[80:89])
+        # try:
+        #     self.addr_recv = NetworkAddress.from_raw(b'0000' + data[20:46])
+        #     self.addr_from = NetworkAddress.from_raw(b'0000' + data[46:72])
+        # except:
+        #     self.log.error('protocol verson decode address error')
+        #     self.handshake.cancel()
+        #     return -1
+        int_len=get_var_int_len(data[80:89])
+        str_len=bytes_to_int(data[80:89][1:int_len], byteorder='little')
+        #str_len, int_len = var_int(data[80:89])
         try:
             self.user_agent = data[80 + int_len:80 + int_len + str_len].decode()
         except:
@@ -136,7 +145,7 @@ class BitcoinProtocol():
         while True:
             t = (time.time())
             self.ping_pong = asyncio.Future()
-            nonce = random.randint(0, bitcoin_max_uint64).to_bytes(8, byteorder='little')
+            nonce = random.randint(0, MAX_UINT64).to_bytes(8, byteorder='little')
             checksum = self.checksum(nonce)
             msg = self.MAGIC + b'ping\x00\x00\x00\x00\x00\x00\x00\x00\x08\x00\x00\x00' + checksum + nonce
             await self.send_msg(msg)
@@ -167,8 +176,6 @@ class BitcoinProtocol():
         try:
             self.reader, self.writer = await asyncio.wait_for(asyncio.open_connection(self.ips, int(self.port)),
                                                               self.CONNECT_TIMEOUT)
-            self.log.debugIII('2')
-
         except Exception as err:
             self.log.debug('exception open_connection %s' % err)
             return
@@ -176,16 +183,16 @@ class BitcoinProtocol():
             self.log.error('writer none')
         self.msg_flow = asyncio.ensure_future(self.get_next_message(), loop=self.loop)
         self.log.debug('handshake...')
-        self.version_nonce = random.randint(0, bitcoin_max_uint64)
-        msg = bitcoin_version.to_bytes(4, byteorder='little')
-        msg += bitcoin_services.to_bytes(8, byteorder='little')
+        self.version_nonce = random.randint(0, MAX_UINT64)
+        msg = PROTOCOL_VERSION.to_bytes(4, byteorder='little')
+        msg += SERVICES.to_bytes(8, byteorder='little')
         msg += int(time.time()).to_bytes(8, byteorder='little')
-        msg += bitcoin_services.to_bytes(8, byteorder='little')
+        msg += SERVICES.to_bytes(8, byteorder='little')
         msg += self.ip.packed + self.port.to_bytes(2, byteorder='little')
-        msg += bitcoin_services.to_bytes(8, byteorder='little')
+        msg += SERVICES.to_bytes(8, byteorder='little')
         msg += self.own_ip.packed + self.own_port.to_bytes(2, byteorder='big')
         msg += self.version_nonce.to_bytes(8, byteorder='little')
-        msg += len(bitcoin_user_agent).to_bytes(1, byteorder='little') + bitcoin_user_agent
+        msg += len(USER_AGENT).to_bytes(1, byteorder='little') + USER_AGENT
         msg += b'\x00\x00\x00\x00\x01'
         l = len(msg)
         ch = self.checksum(msg)
@@ -205,8 +212,6 @@ class BitcoinProtocol():
         self.getheaders_block_locator_hash_list = None
         self.ping_pong_task = asyncio.ensure_future(self.ping_pong_start(), loop=self.loop)
 
-    def connection_lost(self, exc):
-        self.terminate_connection()
 
     def data_received(self, data):
         self.reader.feed_data(data)
@@ -253,7 +258,20 @@ class BitcoinProtocol():
 
 
     def getaddr_request(self, header_opt, checksum, data):
-        pass
+        self.log.warning('getaddr request from %s'% self.ips)
+        t = int(time.time())
+        if (t - self.getaddr_timestamp) < self.GETADDR_INTEVAL:
+            self.log.error('getaddr rejected timeout %s' %self.ips)
+            return
+        self.getaddr_timestamp = t
+
+        msg = b'\x01' + int(time.time()).to_bytes(4, byteorder='little')
+        msg += SERVICES.to_bytes(8, byteorder='little')
+        msg += self.own_ip.packed + self.own_port.to_bytes(2, byteorder='big')
+        header = self.msg_header('addr', msg)
+        asyncio.ensure_future(self.send_msg(header + msg), loop = self.loop)
+        self.log.warning('getaddr reply sent to %s'% self.ips)
+
 
     async def send_msg(self, data):
         try:
@@ -265,14 +283,22 @@ class BitcoinProtocol():
             self.log.debug('\033[4mwrite error connection closed %s\033[2m' % err)
 
 
+    def address(self, header_opt, checksum, data):
+        offset=get_var_int_len(data)
+        count=bytes_to_int(data[1:offset], byteorder='little')
+        #count, offset = var_int(data)
+        if count:
+            if len(data) != (offset + 30* count):
+                self.log.debugI('incorrect message to push_raw_addresses')
+                return
+        if self.address_handler:
+            self.loop.create_task(self.address_handler(data, self.ip, self.port))
+        return
+
+
     async def getaddr(self):
         try:
-            self.log.debug('getaddr')
-            msg = b'\x01' + int(time.time()).to_bytes(4, byteorder='little')
-            msg += bitcoin_services.to_bytes(8, byteorder='little')
-            msg += self.own_ip.packed + self.own_port.to_bytes(2, byteorder='big')
-            header = self.msg_header('addr', msg)
-            await self.send_msg(header + msg)
+            self.log.debug('start to send getaddr request')
             header = self.msg_header('getaddr', b'')
             await self.send_msg(header)
             self.log.debug('getaddr done')

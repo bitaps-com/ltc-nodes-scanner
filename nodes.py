@@ -9,6 +9,7 @@ from protocol import BitcoinProtocol
 import traceback
 import sys
 import asyncpg
+import view
 
 asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 class App:
@@ -44,6 +45,7 @@ class App:
             self.db_pool = await asyncpg.create_pool(dsn=self.dsn,
                                                      loop=self.loop)
             self.background_tasks.append(self.loop.create_task(self.find_nodes()))
+            self.background_tasks.append(self.loop.create_task(self.event_nodes_handler_init()))
 
 
         except Exception as err:
@@ -62,9 +64,36 @@ class App:
     async def node_ask(self,node):
         ip = node['ip']
         port = node['port']
-        node_connect=BitcoinProtocol(ip, port, self.settings, self.log)
-        active_nodes=node_connect.getaddr()
-        await model.update_nodes(self.db_pool,active_nodes)
+        node_connect=BitcoinProtocol(ip, port, self.settings, self.log, self.loop, self.address_handler)
+        active_nodes=await node_connect.getaddr()
+
+
+    async def address_handler(self,data,ip, port):
+        self.log.warning("address response received:")
+        self.log.warning(data)
+        # active nodes - ip and port list
+        events_list = []
+        events_list.append([view.EVENT_ASK_NODE, ip, port])
+        for node in data:
+            events_list.append([view.EVENT_SEE_NODE, node['ip'], node['port']])
+        await model.insert_events_nodes(self.db_pool, events_list)
+
+    async def event_nodes_handler_init(self):
+        while True:
+            try:
+                while True:
+                    await view.event_nodes_handler(self)
+                    await asyncio.sleep(5)
+
+            except asyncio.CancelledError:
+                self.log.info("event handler terminated")
+                break
+            except Exception:
+                self.log.error("Event handler error")
+                self.log.error(traceback.format_exc())
+            await asyncio.sleep(1)
+
+
 
 
     def _exc(self, a, b, c):
