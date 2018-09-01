@@ -1,7 +1,7 @@
 import asyncpg
 import time
 
-async def create_db_model(conn,log):
+async def create_db_model(conn,log,init):
     await conn.execute("""
                             CREATE TABLE IF NOT EXISTS nodes(
                               id BIGSERIAL    PRIMARY KEY,
@@ -9,6 +9,12 @@ async def create_db_model(conn,log):
                               port INT4 NOT NULL,
                               last_seen_timestamp INT4,
                               last_ask_timestamp INT4);""")
+
+    await conn.execute(""" 
+                    INSERT INTO nodes (ip, port, last_seen_timestamp)
+                    VALUES ($1,$2,extract(epoch FROM now())) ON CONFLICT (ip) DO UPDATE SET 
+                    last_seen_timestamp=extract(epoch FROM now())
+                    """, init['ip'],init['port'])
 
 
     await conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS nodes_timestamp "
@@ -39,11 +45,11 @@ async def get_all_known_nodes(pool):
         return result
 
 async def update_nodes(conn,nodes_list):
-        await conn.executemany("INSERT INTO nodes as a (ip, port, last_seen_timestamp,last_ask_timestamp) VALUES ($1,$2,$3,$4) ON DUPLICATE (ip) DO UPDATE SET last_seen_timestamp=COALESCE($3,a.last_seen_timestamp), COALESCE($4,a.last_ask_timestam)", nodes_list)
+        await conn.executemany("INSERT INTO nodes as a (ip, port, last_seen_timestamp,last_ask_timestamp) VALUES ($1,$2,$3,$4) ON CONFLICT (ip) DO UPDATE SET last_seen_timestamp=COALESCE($3,a.last_seen_timestamp), COALESCE($4,a.last_ask_timestam)", nodes_list)
 
 async def insert_events_nodes(pool,events_list):
     async with pool.acquire() as conn:
-        await conn.executemany("INSERT INTO nodes_events (event,ip, port, last_timestamp) VALUES ($1,$2,$3,now())", events_list)
+        await conn.executemany("INSERT INTO nodes_events (event,ip, port, last_timestamp) VALUES ($1,$2,$3,extract(epoch FROM now()))", events_list)
 
 async def get_events_nodes(pool):
     async with pool.acquire() as conn:

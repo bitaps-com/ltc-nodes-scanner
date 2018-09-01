@@ -10,7 +10,7 @@ import traceback
 import sys
 import asyncpg
 import view
-
+import ipaddress
 asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 class App:
     def __init__(self, loop, logger, config):
@@ -20,12 +20,19 @@ class App:
         self.config = config
         self.db_pool = False
         self.dsn = config['POSTGRESQL']['DSN']
+        self.init={}
+        self.init['ip']=ipaddress.IPv4Address(config['INIT_NODE']['IP'])
+        self.init['port'] = int(config['INIT_NODE']['PORT'])
         self.settings={}
         self.settings['MAGIC'] = config['PROTOCOL']["MAGIC_NUMBER"]
-        self.settings['PING_TIMEOUT'] = config['PROTOCOL']["TIMEOUT"]
-        self.settings['HANDSHAKE_TIMEOUT'] = config['PROTOCOL']["TIMEOUT"]
-        self.settings["CONNECT_TIMEOUT"] = config['PROTOCOL']["TIMEOUT"]
-        self.settings['GETADDR_INTEVAL'] = config['PROTOCOL']["GETADDR_INTEVAL"]
+        self.settings['PING_TIMEOUT'] = int(config['PROTOCOL']["TIMEOUT"])
+        self.settings['PROTOCOL_VERSION'] = int(config['PROTOCOL']["PROTOCOL_VERSION"])
+        self.settings['SERVICES'] = int(config['PROTOCOL']["SERVICES"])
+        self.settings['USER_AGENT'] = config['PROTOCOL']["USER_AGENT"]
+        self.settings['MAX_UINT64'] = int(config['PROTOCOL']["MAX_UINT64"])
+        self.settings['HANDSHAKE_TIMEOUT'] = int(config['PROTOCOL']["TIMEOUT"])
+        self.settings["CONNECT_TIMEOUT"] = int(config['PROTOCOL']["TIMEOUT"])
+        self.settings['GETADDR_INTEVAL'] = int(config['PROTOCOL']["GETADDR_INTEVAL"])
 
         self.background_tasks = []
 
@@ -39,7 +46,7 @@ class App:
         try:
             self.log.info("Create database model")
             conn = await asyncpg.connect(dsn=self.dsn)
-            await model.create_db_model(conn,self.log)
+            await model.create_db_model(conn,self.log,self.init)
             await conn.close()
             self.log.info("Init db pool ")
             self.db_pool = await asyncpg.create_pool(dsn=self.dsn,
@@ -55,6 +62,7 @@ class App:
 
     async def find_nodes(self):
         while True:
+            self.log.info("find nodes init")
             known_nodes=await model.get_known_nodes(self.db_pool)
             for node in known_nodes:
                 node_task= self.node_ask(node)
@@ -62,10 +70,11 @@ class App:
             await asyncio.sleep(self.settings['GETADDR_INTEVAL'])
 
     async def node_ask(self,node):
+        self.log.warning("node info %s" %node)
         ip = node['ip']
         port = node['port']
         node_connect=BitcoinProtocol(ip, port, self.settings, self.log, self.loop, self.address_handler)
-        active_nodes=await node_connect.getaddr()
+        #active_nodes=await node_connect.getaddr()
 
 
     async def address_handler(self,data,ip, port):
@@ -80,6 +89,7 @@ class App:
 
     async def event_nodes_handler_init(self):
         while True:
+            self.log.info("event handler init")
             try:
                 while True:
                     await view.event_nodes_handler(self)
@@ -116,7 +126,7 @@ class App:
 
 
 def init(loop):
-    log_level = logging.INFO
+    log_level = logging.DEBUG
     logger = colorlog.getLogger('fwd')
     logger.setLevel(log_level)
     ch = logging.StreamHandler()

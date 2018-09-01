@@ -2,23 +2,13 @@
 import ipaddress
 import time
 import asyncio
-import logger
-import colorlog
 import random
 import struct
 from pybtc import *
-import hashlib
-import json
-import binascii
-import model
-import traceback
 
 
 
-PROTOCOL_VERSION = 70015
-USER_AGENT = "/bitnodes.earn.com:0.1/"
-SERVICES=1
-MAX_UINT64=18446744073709551615
+
 
 class BitcoinProtocol():
     def __init__(self, ip, port, settings,logging, loop, address_handler=None):
@@ -27,6 +17,11 @@ class BitcoinProtocol():
         self.HANDSHAKE_TIMEOUT = settings["HANDSHAKE_TIMEOUT"]
         self.GETADDR_INTEVAL = settings["GETADDR_INTEVAL"]
         self.CONNECT_TIMEOUT=settings["CONNECT_TIMEOUT"]
+        self.PROTOCOL_VERSION=settings['PROTOCOL_VERSION']
+        self.SERVICES=settings['SERVICES']
+        self.USER_AGENT=settings['USER_AGENT']
+        self.MAX_UINT64=settings['MAX_UINT64']
+
         self.cmd_map = {
             b"ping": self.ping,
             b"pong": self.pong,
@@ -62,7 +57,7 @@ class BitcoinProtocol():
         self.raw_version = False
         self.getaddr_timestamp = 0
         self.loop=loop
-
+        self.height=530000
         self.ip = ip
         self.ips = str(ip)
         self.port = port
@@ -145,7 +140,7 @@ class BitcoinProtocol():
         while True:
             t = (time.time())
             self.ping_pong = asyncio.Future()
-            nonce = random.randint(0, MAX_UINT64).to_bytes(8, byteorder='little')
+            nonce = random.randint(0, self.MAX_UINT64).to_bytes(8, byteorder='little')
             checksum = self.checksum(nonce)
             msg = self.MAGIC + b'ping\x00\x00\x00\x00\x00\x00\x00\x00\x08\x00\x00\x00' + checksum + nonce
             await self.send_msg(msg)
@@ -183,22 +178,39 @@ class BitcoinProtocol():
             self.log.error('writer none')
         self.msg_flow = asyncio.ensure_future(self.get_next_message(), loop=self.loop)
         self.log.debug('handshake...')
-        self.version_nonce = random.randint(0, MAX_UINT64)
-        msg = PROTOCOL_VERSION.to_bytes(4, byteorder='little')
-        msg += SERVICES.to_bytes(8, byteorder='little')
+        self.version_nonce = random.randint(0, self.MAX_UINT64)
+        self.log.warning(self.version_nonce)
+        msg = self.PROTOCOL_VERSION.to_bytes(4, byteorder='little')
+        self.log.warning(self.PROTOCOL_VERSION.to_bytes(4, byteorder='little'))
+
+        msg += self.SERVICES.to_bytes(8, byteorder='little')
+        self.log.warning(self.SERVICES.to_bytes(8, byteorder='little'))
+
         msg += int(time.time()).to_bytes(8, byteorder='little')
-        msg += SERVICES.to_bytes(8, byteorder='little')
+        self.log.warning(int(time.time()).to_bytes(8, byteorder='little'))
+
+        msg += self.SERVICES.to_bytes(8, byteorder='little')
+        self.log.warning(self.SERVICES.to_bytes(8, byteorder='little'))
+
         msg += self.ip.packed + self.port.to_bytes(2, byteorder='little')
-        msg += SERVICES.to_bytes(8, byteorder='little')
-        msg += self.own_ip.packed + self.own_port.to_bytes(2, byteorder='big')
+        self.log.warning(self.ip.packed + self.port.to_bytes(2, byteorder='little'))
+        msg += self.SERVICES.to_bytes(8, byteorder='little')
+        self.log.warning(self.SERVICES.to_bytes(8, byteorder='little'))
+        msg += self.own_ip.packed + self.own_port.to_bytes(2, byteorder='little')
+        self.log.warning(self.own_ip.packed + self.own_port.to_bytes(2, byteorder='little'))
         msg += self.version_nonce.to_bytes(8, byteorder='little')
-        msg += len(USER_AGENT).to_bytes(1, byteorder='little') + USER_AGENT
-        msg += b'\x00\x00\x00\x00\x01'
+        self.log.warning(self.version_nonce.to_bytes(8, byteorder='little'))
+        msg += len(self.USER_AGENT).to_bytes(1, byteorder='little') + self.USER_AGENT.encode('utf-8')
+        msg += self.height.to_bytes(4, byteorder='little')
+        self.log.warning(self.height.to_bytes(4, byteorder='little'))
+        relay = 1
+        msg +=relay.to_bytes(1, byteorder='little')
         l = len(msg)
         ch = self.checksum(msg)
         msg = b'\xF9\xBE\xB4\xD9\x76\x65\x72\x73\x69\x6F\x6E\x00\x00\x00\x00\x00' + l.to_bytes(4,
                                                                                                byteorder='little') + ch + msg
 
+        self.log.debug(msg)
         await self.send_msg(msg)
         try:
             await asyncio.wait_for(self.handshake, timeout=self.HANDSHAKE_TIMEOUT)
@@ -212,6 +224,17 @@ class BitcoinProtocol():
         self.getheaders_block_locator_hash_list = None
         self.ping_pong_task = asyncio.ensure_future(self.ping_pong_start(), loop=self.loop)
 
+
+
+    def serialize_string(self, data):
+        length = len(data)
+        if length < 0xFD:
+            return chr(length) + data
+        elif length <= 0xFFFF:
+            return chr(0xFD) + struct.pack("<H", length) + data
+        elif length <= 0xFFFFFFFF:
+            return chr(0xFE) + struct.pack("<I", length) + data
+        return chr(0xFF) + struct.pack("<Q", length) + data
 
     def data_received(self, data):
         self.reader.feed_data(data)
@@ -266,7 +289,7 @@ class BitcoinProtocol():
         self.getaddr_timestamp = t
 
         msg = b'\x01' + int(time.time()).to_bytes(4, byteorder='little')
-        msg += SERVICES.to_bytes(8, byteorder='little')
+        msg += self.SERVICES.to_bytes(8, byteorder='little')
         msg += self.own_ip.packed + self.own_port.to_bytes(2, byteorder='big')
         header = self.msg_header('addr', msg)
         asyncio.ensure_future(self.send_msg(header + msg), loop = self.loop)
