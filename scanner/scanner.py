@@ -2,37 +2,40 @@ import asyncio
 import signal
 import logging
 import colorlog
+import argparse
+from setproctitle import setproctitle
 import configparser
 import uvloop
 import model
+import view
 from protocol import BitcoinProtocol
 import traceback
 import sys
 import asyncpg
-import view
 import ipaddress
 asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 class App:
-    def __init__(self, loop, logger, config):
-        self.loop = loop
+    def __init__(self, logger, config):
+        self.loop = asyncio.get_event_loop()
         self.log = logger
         self.connector = False
         self.config = config
         self.db_pool = False
-        self.dsn = config['POSTGRESQL']['DSN']
+        self.dsn = config['POSTGRESQL']['dsn']
+        self.psql_pool_threads = int(config["POSTGRESQL"]["pool_threads"])
         self.init={}
-        self.init['ip']=ipaddress.IPv4Address(config['INIT_NODE']['IP'])
-        self.init['port'] = int(config['INIT_NODE']['PORT'])
+        # self.init['ip']=ipaddress.IPv4Address(config['INIT_NODE']['IP'])
+        # self.init['port'] = int(config['INIT_NODE']['PORT'])
         self.settings={}
-        self.settings['MAGIC'] = config['PROTOCOL']["MAGIC_NUMBER"]
-        self.settings['PING_TIMEOUT'] = int(config['PROTOCOL']["TIMEOUT"])
-        self.settings['PROTOCOL_VERSION'] = int(config['PROTOCOL']["PROTOCOL_VERSION"])
-        self.settings['SERVICES'] = int(config['PROTOCOL']["SERVICES"])
-        self.settings['USER_AGENT'] = config['PROTOCOL']["USER_AGENT"]
-        self.settings['MAX_UINT64'] = int(config['PROTOCOL']["MAX_UINT64"])
-        self.settings['HANDSHAKE_TIMEOUT'] = int(config['PROTOCOL']["TIMEOUT"])
-        self.settings["CONNECT_TIMEOUT"] = int(config['PROTOCOL']["TIMEOUT"])
-        self.settings['GETADDR_INTEVAL'] = int(config['PROTOCOL']["GETADDR_INTEVAL"])
+        # self.settings['MAGIC'] = config['PROTOCOL']["MAGIC_NUMBER"]
+        # self.settings['PING_TIMEOUT'] = int(config['PROTOCOL']["TIMEOUT"])
+        # self.settings['PROTOCOL_VERSION'] = int(config['PROTOCOL']["PROTOCOL_VERSION"])
+        # self.settings['SERVICES'] = int(config['PROTOCOL']["SERVICES"])
+        # self.settings['USER_AGENT'] = config['PROTOCOL']["USER_AGENT"]
+        # self.settings['MAX_UINT64'] = int(config['PROTOCOL']["MAX_UINT64"])
+        # self.settings['HANDSHAKE_TIMEOUT'] = int(config['PROTOCOL']["TIMEOUT"])
+        # self.settings["CONNECT_TIMEOUT"] = int(config['PROTOCOL']["TIMEOUT"])
+        # self.settings['GETADDR_INTEVAL'] = int(config['PROTOCOL']["GETADDR_INTEVAL"])
 
         self.background_tasks = []
 
@@ -46,15 +49,15 @@ class App:
         try:
             self.log.info("Create database model")
             conn = await asyncpg.connect(dsn=self.dsn)
-            await model.create_db_model(conn,self.log,self.init)
+            # await model.create_db_model(conn, self.log, self.init)
             await conn.close()
             self.log.info("Init db pool ")
             self.db_pool = await asyncpg.create_pool(dsn=self.dsn,
-                                                     loop=self.loop)
-            self.background_tasks.append(self.loop.create_task(self.find_nodes()))
-            self.background_tasks.append(self.loop.create_task(self.event_nodes_handler_init()))
-
-
+                                                     loop=self.loop,
+                                                     min_size=1, max_size=self.psql_pool_threads)
+            # self.background_tasks.append(self.loop.create_task(self.find_nodes()))
+            # self.background_tasks.append(self.loop.create_task(self.event_nodes_handler_init()))
+            self.log.info("Start success")
         except Exception as err:
             self.log.error("Start failed")
             self.log.error(str(traceback.format_exc()))
@@ -125,26 +128,61 @@ class App:
         self.loop.stop()
 
 
-def init(loop):
-    log_level = logging.DEBUG
-    logger = colorlog.getLogger('fwd')
+def init(argv):
+    parser = argparse.ArgumentParser(description="Bitcoin nodes scanner  v 0.0.1")
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("-c", "--config", help = "config file", type=str, nargs=1, metavar=('PATH',))
+    parser.add_argument("-v", "--verbose", help="increase output verbosity", action="count", default=0)
+    args = parser.parse_args()
+
+    config_file = "scanner.conf"
+    log_level = logging.WARNING
+    logger = logging.getLogger("btc_nodes")
+
+    if args.config is not None:
+        config_file = args.config
+    config = configparser.ConfigParser()
+    config.read(config_file)
+    if args.verbose > 0:
+        log_level = logging.INFO
+    if args.verbose > 1:
+        connector_log_level = logging.INFO
+    if args.verbose > 2:
+        log_level = logging.DEBUG
+    if args.verbose > 3:
+        connector_log_level = logging.DEBUG
+
+    logger = colorlog.getLogger('btc_nodes')
     logger.setLevel(log_level)
     ch = logging.StreamHandler()
     ch.setLevel(log_level)
     formatter = colorlog.ColoredFormatter('%(log_color)s%(asctime)s %(levelname)s: %(message)s (%(module)s:%(lineno)d)')
     ch.setFormatter(formatter)
     logger.addHandler(ch)
-    config_file = "config.conf"
+
     config = configparser.ConfigParser()
     config.read(config_file)
-    app = App(loop, logger, config)
+
+    try:
+        config["POSTGRESQL"]["dsn"]
+        config["POSTGRESQL"]["pool_threads"]
+    except Exception as err:
+        logger.critical("Configuration failed: %s" % err)
+        logger.critical("Shutdown")
+        sys.exit(0)
+
+
+    app = App(logger, config)
     return app
 
 
 if __name__ == '__main__':
     loop = asyncio.get_event_loop()
-    app = init(loop)
+    app = init(sys.argv[1:])
     loop.run_forever()
     pending = asyncio.Task.all_tasks()
-    loop.run_until_complete(asyncio.gather(*pending))
+    for task in pending:
+        task.cancel()
+    if pending:
+        loop.run_until_complete(asyncio.wait(pending))
     loop.close()

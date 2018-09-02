@@ -1,4 +1,4 @@
-import model
+from scanner import model
 
 EVENT_SEE_NODE = 1
 EVENT_ASK_NODE = 2
@@ -38,6 +38,6 @@ async def event_nodes_handler(self):
                         nodes[ip]['last_ask_timestamp']])
 
                 await model.update_nodes(conn, nodes_list)
-                await model.delete_events_nodes(conn,id_list)
+                await model.delete_events_nodes(conn, id_list)
 
 
