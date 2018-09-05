@@ -7,104 +7,277 @@ from setproctitle import setproctitle
 import configparser
 import uvloop
 import model
-import view
 from protocol import BitcoinProtocol
 import traceback
 import sys
 import asyncpg
-import ipaddress
+import aiodns
+import time
+import aiosocks
+from utils import *
+
 asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+
+
 class App:
+
     def __init__(self, logger, config):
+        setproctitle('btc node scanner')
         self.loop = asyncio.get_event_loop()
         self.log = logger
-        self.connector = False
         self.config = config
         self.db_pool = False
+        self.network = {"default_port": int(config["NETWORK"]["default_port"]),
+                        "magic": int(config["NETWORK"]["magic"], 16),
+                        "version": int(config["NETWORK"]["version"]),
+                        "services": int(config["NETWORK"]["services"], 2),
+                        "ping_timeout": int(config["NETWORK"]["ping_timeout"]),
+                        "connect_timeout": int(config["NETWORK"]["connect_timeout"]),
+                        "handshake_timeout": int(config["NETWORK"]["handshake_timeout"]),
+                        "ip": '::ffff:127.0.0.1',
+                        "user_agent": config["NETWORK"]["user_agent"],
+                        }
+
+        self.seed_domain = config["SEED"]["domain"].split(",")
         self.dsn = config['POSTGRESQL']['dsn']
         self.psql_pool_threads = int(config["POSTGRESQL"]["pool_threads"])
-        self.init={}
-        # self.init['ip']=ipaddress.IPv4Address(config['INIT_NODE']['IP'])
-        # self.init['port'] = int(config['INIT_NODE']['PORT'])
-        self.settings={}
-        # self.settings['MAGIC'] = config['PROTOCOL']["MAGIC_NUMBER"]
-        # self.settings['PING_TIMEOUT'] = int(config['PROTOCOL']["TIMEOUT"])
-        # self.settings['PROTOCOL_VERSION'] = int(config['PROTOCOL']["PROTOCOL_VERSION"])
-        # self.settings['SERVICES'] = int(config['PROTOCOL']["SERVICES"])
-        # self.settings['USER_AGENT'] = config['PROTOCOL']["USER_AGENT"]
-        # self.settings['MAX_UINT64'] = int(config['PROTOCOL']["MAX_UINT64"])
-        # self.settings['HANDSHAKE_TIMEOUT'] = int(config['PROTOCOL']["TIMEOUT"])
-        # self.settings["CONNECT_TIMEOUT"] = int(config['PROTOCOL']["TIMEOUT"])
-        # self.settings['GETADDR_INTEVAL'] = int(config['PROTOCOL']["GETADDR_INTEVAL"])
-
+        self.online_nodes = 0
+        self.not_scanned_addresses = dict()
+        self.scanning_addresses = dict()
+        self.scanned_addresses = set()
+        self.scan_threads_limit = 500
+        self.scan_threads = 0
+        self.discovered_nodes = 0
         self.background_tasks = []
-
-        self.log.info("Nodes find server init ...")
+        self.log.info("Start btc node scanner ...")
         signal.signal(signal.SIGINT, self.terminate)
         signal.signal(signal.SIGTERM, self.terminate)
-        asyncio.ensure_future(self.start(), loop=self.loop)
+        asyncio.ensure_future(self.start())
 
     async def start(self):
         # init database
         try:
-            self.log.info("Create database model")
-            conn = await asyncpg.connect(dsn=self.dsn)
-            # await model.create_db_model(conn, self.log, self.init)
-            await conn.close()
             self.log.info("Init db pool ")
             self.db_pool = await asyncpg.create_pool(dsn=self.dsn,
                                                      loop=self.loop,
                                                      min_size=1, max_size=self.psql_pool_threads)
-            # self.background_tasks.append(self.loop.create_task(self.find_nodes()))
-            # self.background_tasks.append(self.loop.create_task(self.event_nodes_handler_init()))
-            self.log.info("Start success")
+            await model.create_db_model(self.db_pool)
         except Exception as err:
             self.log.error("Start failed")
             self.log.error(str(traceback.format_exc()))
             self.terminate(None, None)
+        self.background_tasks.append(self.loop.create_task(self.discovery_loop()))
+        self.background_tasks.append(self.loop.create_task(self.statistics_loop()))
 
-    async def find_nodes(self):
+
+
+    async def discovery_loop(self):
         while True:
-            self.log.info("find nodes init")
-            known_nodes=await model.get_known_nodes(self.db_pool)
-            for node in known_nodes:
-                node_task= self.node_ask(node)
-                self.loop.create_task(node_task)
-            await asyncio.sleep(self.settings['GETADDR_INTEVAL'])
-
-    async def node_ask(self,node):
-        self.log.warning("node info %s" %node)
-        ip = node['ip']
-        port = node['port']
-        node_connect=BitcoinProtocol(ip, port, self.settings, self.log, self.loop, self.address_handler)
-        #active_nodes=await node_connect.getaddr()
-
-
-    async def address_handler(self,data,ip, port):
-        self.log.warning("address response received:")
-        self.log.warning(data)
-        # active nodes - ip and port list
-        events_list = []
-        events_list.append([view.EVENT_ASK_NODE, ip, port])
-        for node in data:
-            events_list.append([view.EVENT_SEE_NODE, node['ip'], node['port']])
-        await model.insert_events_nodes(self.db_pool, events_list)
-
-    async def event_nodes_handler_init(self):
-        while True:
-            self.log.info("event handler init")
             try:
-                while True:
-                    await view.event_nodes_handler(self)
-                    await asyncio.sleep(5)
+                self.log.info("Start nodes discovering ...")
+                await asyncio.sleep(10)
 
+                q = time.time()
+                progress_timer = time.time()
+                self.discovered_nodes = 0
+                self.online_nodes = 0
+                self.not_scanned_addresses = dict()
+                self.scanning_addresses = dict()
+                self.scanned_addresses = set()
+                await self.get_seed_from_dns()
+                await self.get_bootstrap_from_db()
+                self.add_bootstrap_tor_seed()
+                while self.not_scanned_addresses or self.scanning_addresses:
+                    if self.scan_threads < self.scan_threads_limit:
+                        if self.not_scanned_addresses:
+                            address = next(iter(self.not_scanned_addresses))
+                            port = self.not_scanned_addresses[address]["port"]
+                            del self.not_scanned_addresses[address]
+                            self.scanning_addresses[address] = {"port": port}
+                            self.scan_threads += 1
+                            self.loop.create_task(self.scan_address(address, port))
+                        else:
+                            await asyncio.sleep(0.1)
+                    else:
+                        await asyncio.sleep(0.1)
+                    if time.time() - progress_timer > 2:
+                        progress_timer = time.time()
+                        total = len(self.not_scanned_addresses) + len(self.scanning_addresses)
+                        total +=  len(self.scanned_addresses)
+                        self.log.info("Scan progress %s discovered addresses %s scanned addresses %s [%s] %s " %
+                                      (str(round((len(self.scanned_addresses) / total ) * 100, 2)) + "%",
+                                       total,
+                                       len(self.scanned_addresses),
+                                       self.online_nodes,
+                                       self.scan_threads))
+                self.log.info("Scanned %s addresses, discovered %s active nodes [%s] %s" % (len(self.scanned_addresses),
+                                                                                         self.discovered_nodes,
+                                                                                         round(time.time() - q, 2),
+                                                                                            self.scan_threads))
             except asyncio.CancelledError:
-                self.log.info("event handler terminated")
+                self.log.warning("Discovery task canceled")
                 break
-            except Exception:
-                self.log.error("Event handler error")
-                self.log.error(traceback.format_exc())
+            except Exception as err:
+                self.log.critical("Discovery task  error %s" % err)
+                self.log.critical(str(traceback.format_exc()))
             await asyncio.sleep(1)
+
+
+    async def statistics_loop(self):
+        while True:
+            try:
+                await model.summary(self.db_pool)
+            except asyncio.CancelledError:
+                self.log.warning("Statistics task canceled")
+                break
+            except Exception as err:
+                self.log.critical("Statistics task  error %s" % err)
+                self.log.critical(str(traceback.format_exc()))
+            await asyncio.sleep(1)
+            print(">>")
+
+
+
+
+
+    async def get_bootstrap_from_db(self):
+        rows =await model.get_last_24hours_addresses(self.db_pool)
+        for row in rows:
+            self.not_scanned_addresses[row["ip"].decode()] = {"port" :row["port"],
+                                                             "address": row["ip"].decode()}
+        self.log.info("Last 24 hours active addresses from db %s" % len(rows))
+
+    async def get_seed_from_dns(self):
+        self.log.info("Get bootstrap addresses from dns seeds")
+        tasks = []
+        for domain in self.seed_domain:
+            tasks.append(self.loop.create_task(self.resolve_domain(domain)))
+        await asyncio.wait(tasks)
+        self.log.info("All seed domains resolved, received %s addresses" % len(self.not_scanned_addresses))
+
+    def add_bootstrap_tor_seed(self):
+        tor_seeds = [
+            ('5ghqw4wj6hpgfvdg.onion', 8333),
+            ('bitcoinostk4e4re.onion', 8333),
+            ('bk5ejfe56xakvtkk.onion', 8333),
+            ('czsbwh4pq4mh3izl.onion', 8333),
+            ('e3tn727fywnioxrc.onion', 8333),
+            ('evolynhit7shzeet.onion', 8333),
+            ('i2r5tbaizb75h26f.onion', 8333),
+            ('jxrvw5iqizppbgml.onion', 8333),
+            ('kjy2eqzk4zwi5zd3.onion', 8333),
+            ('pqosrh6wfaucet32.onion', 8333),
+            ('pt2awtcs2ulm75ig.onion', 8333),
+            ('szsm43ou7otwwyfv.onion', 8333),
+            ('tfu4kqfhsw5slqp2.onion', 8333),
+            ('vso3r6cmjoomhhgg.onion', 8333),
+            ('xdnigz4qn5dbbw2t.onion', 8333),
+            ('zy3kdqowmrb7xm7h.onion', 8333)
+        ]
+        for a in tor_seeds:
+            self.not_scanned_addresses[a[0]] = {"port": a[1],
+                                                "address": a[0]}
+
+    async def resolve_domain(self, domain):
+        self.log.debug('resolving domain %s' % domain)
+        resolver = aiodns.DNSResolver(loop=self.loop)
+        query = resolver.query(domain, 'A')
+        try:
+            result = await asyncio.ensure_future(query, loop=self.loop)
+        except Exception as err:
+            self.log.error('%s %s' % (domain, err))
+            return
+        c = 0
+        for i in result:
+            self.log.debug('%s received from %s' % (i.host, domain))
+            c += 1
+            if not self.not_scanned_addresses or 1:
+                self.not_scanned_addresses[i.host] = {"port": self.network["default_port"],
+                                                               "address": i.host}
+        query = resolver.query(domain, 'AAAA')
+        try:
+            result = await asyncio.ensure_future(query, loop=self.loop)
+        except Exception as err:
+            self.log.error('%s %s' % (domain, err))
+            return
+        t = 0
+        c2 = 0
+        for i in result:
+            self.log.debug('%s received from %s' % (i.host, domain))
+            c2 += 1
+            if not self.not_scanned_addresses or 1:
+                a = bytes_to_address(ip_address_to_bytes(i.host))
+                if a.endswith('.onion'):
+                    t += 1
+                self.not_scanned_addresses[i.host] = {"port": self.network["default_port"],
+                                                               "address": i.host}
+
+
+
+        self.log.info('%s ipv4 %s ipv6 %s  tor addresses received from %s' % (c, c2, t, domain))
+
+    async def scan_address(self, address, port):
+        try:
+            if address.endswith(".onion"):
+                proxy = aiosocks.Socks5Addr('127.0.0.1', 9050)
+            else:
+                proxy = None
+            conn = BitcoinProtocol(address, port, self.network, self.log, proxy = proxy)
+            try:
+                await asyncio.wait_for(conn.handshake, timeout=10)
+            except:
+                pass
+            if conn.handshake.result() == True:
+                try:
+                    await asyncio.wait_for(conn.addresses_received, timeout=10)
+                except:
+                    pass
+                for a in conn.addresses:
+                    if a["address"] not in self.not_scanned_addresses:
+                        if a["address"] not in self.scanning_addresses:
+                            if a["address"] not in self.scanned_addresses:
+                                self.not_scanned_addresses[a["address"]] = a
+                self.online_nodes += 1
+                # add record to db
+                net = network_type(address)
+                if net == "TOR":
+                    geo = {"country": None,
+                            "city": None,
+                            "geo": None,
+                            "timezone": None,
+                            "asn": None,
+                            "org": None}
+                else:
+                    geo = await self.loop.run_in_executor(None, model.get_geoip, address)
+
+                await model.report_online(address,
+                                          port,
+                                          net,
+                                          conn.user_agent,
+                                          conn.latency,
+                                          conn.version,
+                                          conn.start_height,
+                                          conn.services,
+                                          geo,
+                                          int(time.time()),
+                                          self.db_pool)
+            else:
+                await model.report_offline(address,
+                                           self.db_pool)
+            conn.__del__()
+        except:
+            try:
+                await model.report_offline(address,
+                                           self.db_pool)
+                conn.__del__()
+            except:
+                pass
+
+        self.scan_threads -= 1
+        del self.scanning_addresses[address]
+        self.scanned_addresses.add(address)
+
+
 
 
 
@@ -131,7 +304,7 @@ class App:
 def init(argv):
     parser = argparse.ArgumentParser(description="Bitcoin nodes scanner  v 0.0.1")
     group = parser.add_mutually_exclusive_group()
-    group.add_argument("-c", "--config", help = "config file", type=str, nargs=1, metavar=('PATH',))
+    group.add_argument("-c", "--config", help="config file", type=str, nargs=1, metavar=('PATH',))
     parser.add_argument("-v", "--verbose", help="increase output verbosity", action="count", default=0)
     args = parser.parse_args()
 
@@ -166,11 +339,19 @@ def init(argv):
     try:
         config["POSTGRESQL"]["dsn"]
         config["POSTGRESQL"]["pool_threads"]
+        config["SEED"]["domain"]
+        int(config["NETWORK"]["default_port"])
+        int(config["NETWORK"]["magic"], 16)
+        int(config["NETWORK"]["version"])
+        int(config["NETWORK"]["services"], 2)
+        config["NETWORK"]["user_agent"]
+        int(config["NETWORK"]["ping_timeout"])
+        int(config["NETWORK"]["connect_timeout"])
+        int(config["NETWORK"]["handshake_timeout"])
     except Exception as err:
         logger.critical("Configuration failed: %s" % err)
         logger.critical("Shutdown")
         sys.exit(0)
-
 
     app = App(logger, config)
     return app
