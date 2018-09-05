@@ -1,9 +1,0 @@
-*.conf
-*.log
-*.out
-*.pyc
-.DS_Store
-/.idea/
-/data/
-/tests/
-
