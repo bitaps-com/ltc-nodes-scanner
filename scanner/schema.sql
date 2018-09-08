@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS stat(
                                 ipv4_total BIGINT DEFAULT 0,
                                 ipv6_total BIGINT DEFAULT 0,
                                 tor_total BIGINT DEFAULT 0);
+TRUNCATE stat;
 INSERT INTO stat (
                   total,
                   ipv4_total,

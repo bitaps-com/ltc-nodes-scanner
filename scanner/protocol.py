@@ -176,7 +176,8 @@ class BitcoinProtocol():
                     if r == -1:
                         return
                 except Exception as err:
-                    self.log.error('command processing error [%s] %s' % (str(command), err))
+                    if self.verbose:
+                        self.log.error('command processing error [%s] %s' % (str(command), err))
 
 
     def ping(self, header_opt, checksum, data):
@@ -228,8 +229,10 @@ class BitcoinProtocol():
         else:
             self.relay = int.from_bytes(data[-1:], byteorder='little')
         # check if this node not from future
-        if int((int(time.time()) - 1231469665) / 60 / 7.5) < self.start_height:
-            self.log.error('%s start_height %s  ' % (self.ip, self.start_height))
+        # print(self.start_height)
+        if int((int(time.time()) - 1231469665) / 60 / 8.5) < self.start_height:
+            if self.verbose:
+                self.log.error('%s start_height %s  ' % (self.ip, self.start_height))
             self.version = None
             self.handshake.set_result(False)
             return
@@ -266,6 +269,7 @@ class BitcoinProtocol():
                self.log.debug('>> %s' % data[4:16].decode())
             await self.writer.drain()
         except Exception as err:
-            self.log.debug('write error connection closed %s' % err)
+            if self.verbose:
+                self.log.debug('write error connection closed %s' % err)
 
 

@@ -16,6 +16,7 @@ import time
 import aiosocks
 from utils import *
 
+
 asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
 
@@ -45,7 +46,7 @@ class App:
         self.not_scanned_addresses = dict()
         self.scanning_addresses = dict()
         self.scanned_addresses = set()
-        self.scan_threads_limit = 500
+        self.scan_threads_limit = 1000
         self.scan_threads = 0
         self.discovered_nodes = 0
         self.background_tasks = []
@@ -74,9 +75,7 @@ class App:
     async def discovery_loop(self):
         while True:
             try:
-                self.log.info("Start nodes discovering ...")
-                await asyncio.sleep(10)
-
+                self.log.info("Start discovering round")
                 q = time.time()
                 progress_timer = time.time()
                 self.discovered_nodes = 0
@@ -104,23 +103,21 @@ class App:
                         progress_timer = time.time()
                         total = len(self.not_scanned_addresses) + len(self.scanning_addresses)
                         total +=  len(self.scanned_addresses)
-                        self.log.info("Scan progress %s discovered addresses %s scanned addresses %s [%s] %s " %
+                        self.log.info("Scan progress: %s discovered: %s scanned: %s success: %s  threads: %s " %
                                       (str(round((len(self.scanned_addresses) / total ) * 100, 2)) + "%",
                                        total,
                                        len(self.scanned_addresses),
                                        self.online_nodes,
                                        self.scan_threads))
-                self.log.info("Scanned %s addresses, discovered %s active nodes [%s] %s" % (len(self.scanned_addresses),
-                                                                                         self.discovered_nodes,
-                                                                                         round(time.time() - q, 2),
-                                                                                            self.scan_threads))
+
+                self.log.info("Discovery round completed")
             except asyncio.CancelledError:
                 self.log.warning("Discovery task canceled")
                 break
             except Exception as err:
                 self.log.critical("Discovery task  error %s" % err)
                 self.log.critical(str(traceback.format_exc()))
-            await asyncio.sleep(1)
+            await asyncio.sleep(10)
 
 
     async def statistics_loop(self):
@@ -134,7 +131,6 @@ class App:
                 self.log.critical("Statistics task  error %s" % err)
                 self.log.critical(str(traceback.format_exc()))
             await asyncio.sleep(1)
-            print(">>")
 
 
 
@@ -265,6 +261,7 @@ class App:
                 await model.report_offline(address,
                                            self.db_pool)
             conn.__del__()
+
         except:
             try:
                 await model.report_offline(address,
@@ -310,7 +307,6 @@ def init(argv):
 
     config_file = "scanner.conf"
     log_level = logging.WARNING
-    logger = logging.getLogger("btc_nodes")
 
     if args.config is not None:
         config_file = args.config
@@ -319,17 +315,15 @@ def init(argv):
     if args.verbose > 0:
         log_level = logging.INFO
     if args.verbose > 1:
-        connector_log_level = logging.INFO
-    if args.verbose > 2:
         log_level = logging.DEBUG
-    if args.verbose > 3:
-        connector_log_level = logging.DEBUG
+
 
     logger = colorlog.getLogger('btc_nodes')
     logger.setLevel(log_level)
     ch = logging.StreamHandler()
     ch.setLevel(log_level)
-    formatter = colorlog.ColoredFormatter('%(log_color)s%(asctime)s %(levelname)s: %(message)s (%(module)s:%(lineno)d)')
+    formatter = colorlog.ColoredFormatter('%(log_color)s%(asctime)s %(levelname)s: %(message)s')
+    # formatter = colorlog.ColoredFormatter('%(log_color)s%(asctime)s %(levelname)s: %(message)s (%(module)s:%(lineno)d)')
     ch.setFormatter(formatter)
     logger.addHandler(ch)
 

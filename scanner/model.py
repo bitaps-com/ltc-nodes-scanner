@@ -92,17 +92,17 @@ async def report_online(address,
                                "ON CONFLICT(ip) "
                                "DO UPDATE "
                                "SET "
-                               "port = a.port,"
-                               "network = a.network,"
-                               "agent = a.agent,"
-                               "latency = a.latency,"
-                               "version = a.version,"
-                               "block_height = a.block_height,"
-                               "services = a.services,"
-                               "country = a.country,"
-                               "city = a.city,"
-                               "geo = a.geo, "
-                               "timestamp = a.timestamp;",
+                               "port = EXCLUDED.port,"
+                               "network = EXCLUDED.network,"
+                               "agent = EXCLUDED.agent,"
+                               "latency = EXCLUDED.latency,"
+                               "version = EXCLUDED.version,"
+                               "block_height = EXCLUDED.block_height,"
+                               "services = EXCLUDED.services,"
+                               "country = EXCLUDED.country,"
+                               "city = EXCLUDED.city,"
+                               "geo = EXCLUDED.geo, "
+                               "timestamp = EXCLUDED.timestamp;",
                                address.encode(),
                                port,
                                network_type.encode(),
@@ -223,28 +223,28 @@ async def summary(pool):
                                    "as a (agent, count) "
                                    "values  ($1,$2) "
                                    "ON CONFLICT (agent) "
-                                   "DO UPDATE SET count = a.count",
+                                   "DO UPDATE SET count = EXCLUDED.count",
                                    [(k,agent[k]) for k in agent])
 
             await conn.executemany("INSERT INTO country_stat "
                                    "as a (country, count) "
                                    "values  ($1,$2) "
                                    "ON CONFLICT (country) "
-                                   "DO UPDATE SET count = a.count",
+                                   "DO UPDATE SET count = EXCLUDED.count",
                                    [(k,country[k]) for k in country])
 
             await conn.executemany("INSERT INTO user_agent_daily_stat "
                                    "as a (day, agent, count) "
                                    "values  ($1,$2,$3) "
                                    "ON CONFLICT (agent, day) "
-                                   "DO UPDATE SET count = a.count",
+                                   "DO UPDATE SET count = EXCLUDED.count",
                                    [(day, k,agent[k]) for k in agent])
 
             await conn.executemany("INSERT INTO country_daily_stat "
                                    "as a (day, country, count) "
                                    "values  ($1,$2,$3) "
                                    "ON CONFLICT (country, day) "
-                                   "DO UPDATE SET count = a.count",
+                                   "DO UPDATE SET count = EXCLUDED.count",
                                    [(day, k,country[k]) for k in country])
 
 
@@ -252,31 +252,31 @@ async def summary(pool):
                                    "as a (day, network, count) "
                                    "values  ($1,$2,$3) "
                                    "ON CONFLICT (network, day) "
-                                   "DO UPDATE SET count = a.count",
+                                   "DO UPDATE SET count = EXCLUDED.count",
                                    [(day, k,network[k]) for k in network])
 
             await conn.executemany("INSERT INTO user_agent_monthly_stat "
                                    "as a (month, agent, count) "
                                    "values  ($1,$2,$3) "
                                    "ON CONFLICT (agent, month) "
-                                   "DO UPDATE SET count = a.count",
+                                   "DO UPDATE SET count = EXCLUDED.count",
                                    [(month, k,agent[k]) for k in agent])
 
             await conn.executemany("INSERT INTO country_monthly_stat "
                                    "as a (month, country, count) "
                                    "values  ($1,$2,$3) "
                                    "ON CONFLICT (country, month) "
-                                   "DO UPDATE SET count = a.count",
+                                   "DO UPDATE SET count = EXCLUDED.count",
                                    [(month, k,country[k]) for k in country])
 
             await conn.executemany("INSERT INTO network_monthly_stat "
                                    "as a (month, network, count) "
                                    "values  ($1,$2,$3) "
                                    "ON CONFLICT (network, month) "
-                                   "DO UPDATE SET count = a.count",
+                                   "DO UPDATE SET count = EXCLUDED.count",
                                    [(month, k,network[k]) for k in network])
 
 
 
     except:
-        print(traceback.format_exc())
+        pass
