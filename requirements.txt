@@ -6,3 +6,4 @@ pybtc
 aiodns
 aiosocks
 geoip2
+pympler
