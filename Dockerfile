@@ -16,5 +16,5 @@ RUN cd /geoip;tar --strip-components=1 -zxf GeoLite2-City.tar.gz; rm GeoLite2-Ci
 RUN cd /geoip;tar --strip-components=1 -zxf GeoLite2-ASN.tar.gz; rm GeoLite2-ASN.tar.gz
 RUN cd /geoip;tar --strip-components=1 -zxf GeoLite2-Country.tar.gz; rm GeoLite2-Country.tar.gz
 
-WORKDIR /scanner
-ENTRYPOINT service tor restart && python3 scanner.py -v
+WORKDIR /src
+ENTRYPOINT service tor restart && python3 main.py -v

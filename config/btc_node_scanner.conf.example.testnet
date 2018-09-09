@@ -1,0 +1,24 @@
+[POSTGRESQL]
+
+dsn = postgres://postgres:test@/btc_nodes
+pool_threads = 15
+
+[SEED]
+
+domain = testnet-seed.bitcoin.jonasschnelli.ch,seed.tbtc.petertodd.org,seed.testnet.bitcoin.sprovoost.nl,testnet-seed.bluematt.me
+
+
+[NETWORK]
+
+default_port = 18333
+magic = 0x0709110B
+version = 70015
+services = 0b0000000000000000000000000000000000000000000000000000000000000001
+user_agent = /btc_node_scanner:0.0.1/
+ping_timeout = 5
+connect_timeout = 15
+handshake_timeout = 6
+
+[SCAN]
+
+threads = 200
