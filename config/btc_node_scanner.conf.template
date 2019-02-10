@@ -1,0 +1,25 @@
+[POSTGRESQL]
+
+dsn = postgres://postgres:test@/btc_nodes
+pool_threads = 15
+
+[SEED]
+
+domain = seed-a.litecoin.loshan.co.uk,dnsseed.thrasher.io,dnsseed.litecointools.com,dnsseed.litecoinpool.org,dnsseed.koin-project.com
+
+
+[NETWORK]
+
+default_port = 9333
+# https://github.com/litecoin-project/litecoin/blob/master/src/chainparams.cpp#L116
+magic = 0xDBB6C0FB
+version = 70015
+services = 0b0000000000000000000000000000000000000000000000000000000000000001
+user_agent = /ltc_node_scanner:0.0.1/
+ping_timeout = 5
+connect_timeout = 15
+handshake_timeout = 6
+
+[SCAN]
+
+threads = 1000
