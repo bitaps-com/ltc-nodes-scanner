@@ -1,6 +1,6 @@
 [POSTGRESQL]
 
-dsn = postgres://postgres:test@/btc_nodes
+dsn = postgres://postgres:test@/ltc_nodes
 pool_threads = 15
 
 [SEED]
@@ -9,7 +9,7 @@ domain = seed-a.litecoin.loshan.co.uk,dnsseed.thrasher.io,dnsseed.litecointools.
 
 
 [NETWORK]
-
+testnet = 0
 default_port = 9333
 # https://github.com/litecoin-project/litecoin/blob/master/src/chainparams.cpp#L116
 magic = 0xDBB6C0FB

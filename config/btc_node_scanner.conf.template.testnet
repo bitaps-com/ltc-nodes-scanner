@@ -1,20 +1,21 @@
 [POSTGRESQL]
 
-dsn = postgres://postgres:test@/btc_nodes
+dsn = postgres://postgres:test@/ltc_nodes
 pool_threads = 15
 
 [SEED]
-
-domain = testnet-seed.bitcoin.jonasschnelli.ch,seed.tbtc.petertodd.org,seed.testnet.bitcoin.sprovoost.nl,testnet-seed.bluematt.me
+# https://github.com/litecoin-project/litecoin/blob/master/src/chainparams.cpp#L236
+domain = testnet-seed.litecointools.com,seed-b.litecoin.loshan.co.uk,dnsseed-testnet.thrasher.io
 
 
 [NETWORK]
-
-default_port = 18333
-magic = 0x0709110B
+testnet = 1
+default_port = 19333
+# https://github.com/litecoin-project/litecoin/blob/master/src/chainparams.cpp#L221
+magic = 0xF1C8D2FD
 version = 70015
 services = 0b0000000000000000000000000000000000000000000000000000000000000001
-user_agent = /btc_node_scanner:0.0.1/
+user_agent = /ltc_node_scanner:0.0.1/
 ping_timeout = 5
 connect_timeout = 15
 handshake_timeout = 6
