@@ -1,6 +1,9 @@
-mkdir /tmp/postgres_btc_nodes
-docker volume create btc_nodes_data
-docker build -t postgres_btc_nodes . && \
-docker run --rm  --name postgres_btc_nodes \
-       -v btc_nodes_data:/var/lib/postgresql/data -v /tmp/postgres_btc_nodes:/var/run/postgresql/ \
-       -it postgres_btc_nodes
+mkdir /tmp/postgres_ltc_nodes_mainnet
+docker volume create ltc_nodes_data_mainnet
+docker build -t postgres_ltc_nodes_mainnet .
+docker run \
+       --restart=always \
+       --name postgres_ltc_nodes_mainnet \
+       -v ltc_nodes_data_mainnet:/var/lib/postgresql/data \
+       -v /tmp/postgres_ltc_nodes_mainnet:/var/run/postgresql/ \
+       -it postgres_ltc_nodes_mainnet
