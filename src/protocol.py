@@ -210,7 +210,7 @@ class BitcoinProtocol():
             self.handshake.set_result(False)
             return
         # exclude bitcoin cash nodes
-        # NODE_UNSUPPORTED_SERVICE_BIT_5 = (1 << 5)
+        NODE_UNSUPPORTED_SERVICE_BIT_5 = (1 << 5)
 
         self.services = int.from_bytes(data[4:12], byteorder='little')
         # if self.services & NODE_UNSUPPORTED_SERVICE_BIT_5:

@@ -38,7 +38,7 @@ class App:
                         "ip": '::ffff:127.0.0.1',
                         "user_agent": config["NETWORK"]["user_agent"],
                         }
-        self.testnet = True if config["NETWORK"]["testnet"] == 1 else False
+        self.testnet = True if config["NETWORK"]["testnet"] == "1" else False
         self.seed_domain = config["SEED"]["domain"].split(",")
         self.dsn = config['POSTGRESQL']['dsn']
         self.psql_pool_threads = int(config["POSTGRESQL"]["pool_threads"])
