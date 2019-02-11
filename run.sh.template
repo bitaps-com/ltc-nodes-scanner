@@ -1,0 +1,8 @@
+docker build -t ltc_nodes_scanner_mainnet .
+docker run  \
+       --restart=always \
+       --name ltc_nodes_scanner_mainnet \
+       -v /tmp/postgres_ltc_nodes_mainnet:/var/run/postgresql \
+       --memory-swap -1 \
+       --net=host  \
+       -it ltc_nodes_scanner_mainnet -vvv
