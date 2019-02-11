@@ -10,6 +10,7 @@ domain = seed-a.litecoin.loshan.co.uk,dnsseed.thrasher.io,dnsseed.litecointools.
 
 [NETWORK]
 testnet = 0
+block_interval = 2.5
 default_port = 9333
 # https://github.com/litecoin-project/litecoin/blob/master/src/chainparams.cpp#L116
 magic = 0xDBB6C0FB

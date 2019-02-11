@@ -38,7 +38,8 @@ class App:
                         "ip": '::ffff:127.0.0.1',
                         "user_agent": config["NETWORK"]["user_agent"],
                         }
-        self.testnet = True if config["NETWORK"]["magic"] != "0xDBB6C0FB" else False
+        self.testnet = True if config["NETWORK"]["testnet"] != "1" else False
+        self.block_interval = float(config["NETWORK"]["block_interval"])
         self.seed_domain = config["SEED"]["domain"].split(",")
         self.dsn = config['POSTGRESQL']['dsn']
         self.psql_pool_threads = int(config["POSTGRESQL"]["pool_threads"])
@@ -153,32 +154,9 @@ class App:
 
     def add_bootstrap_tor_seed(self):
         if self.testnet:
-            tor_seeds = [
-                ('thfsmmn2jbitcoin.onion', 18333),
-                ('it2pj4f7657g3rhi.onion', 18333),
-                ('nkf5e6b7pl4jfd4a.onion', 18333),
-                ('4zhkir2ofl7orfom.onion', 18333),
-                ('t6xj6wilh4ytvcs7.onion', 18333),
-                ('i6y6ivorwakd7nw3.onion', 18333),
-                ('ubqj4rsu3nqtxmtp.onion', 18333)]
+            tor_seeds = []
         else:
             tor_seeds = [
-                ('5ghqw4wj6hpgfvdg.onion', 8333),
-                ('bitcoinostk4e4re.onion', 8333),
-                ('bk5ejfe56xakvtkk.onion', 8333),
-                ('czsbwh4pq4mh3izl.onion', 8333),
-                ('e3tn727fywnioxrc.onion', 8333),
-                ('evolynhit7shzeet.onion', 8333),
-                ('i2r5tbaizb75h26f.onion', 8333),
-                ('jxrvw5iqizppbgml.onion', 8333),
-                ('kjy2eqzk4zwi5zd3.onion', 8333),
-                ('pqosrh6wfaucet32.onion', 8333),
-                ('pt2awtcs2ulm75ig.onion', 8333),
-                ('szsm43ou7otwwyfv.onion', 8333),
-                ('tfu4kqfhsw5slqp2.onion', 8333),
-                ('vso3r6cmjoomhhgg.onion', 8333),
-                ('xdnigz4qn5dbbw2t.onion', 8333),
-                ('zy3kdqowmrb7xm7h.onion', 8333)
             ]
         for a in tor_seeds:
             self.not_scanned_addresses[a[0]] = {"port": a[1],
@@ -228,7 +206,7 @@ class App:
                 proxy = aiosocks.Socks5Addr('127.0.0.1', 9050)
             else:
                 proxy = None
-            conn = BitcoinProtocol(address, port, self.network, self.testnet, self.log, proxy = proxy)
+            conn = BitcoinProtocol(address, port, self.network, self.testnet, self.block_interval, self.log, proxy = proxy)
             try:
                 await asyncio.wait_for(conn.handshake, timeout=10)
             except:

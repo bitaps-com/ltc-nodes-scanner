@@ -7,13 +7,14 @@ from utils import *
 
 class BitcoinProtocol():
 
-    def __init__(self, ip, port, settings, testnet, log, verbose = 0, proxy = None):
+    def __init__(self, ip, port, settings, testnet, block_interval, log, verbose = 0, proxy = None):
         self.settings = settings
         self.ip = ip
         self.proxy = proxy
         self.verbose = verbose
         self.port = port
         self.log = log
+        self.block_interval = block_interval
         self.testnet = testnet
         self.loop = asyncio.get_event_loop()
         self.status = "connecting"
@@ -232,7 +233,7 @@ class BitcoinProtocol():
         # check if this node not from future
         # print(self.start_height)
         if not self.testnet:
-            if int((int(time.time()) - 1231469665) / 60 / 8.5) < self.start_height:
+            if int((int(time.time()) - 1231469665) / 60 / (self.block_interval * 0.8)) < self.start_height:
                 if self.verbose:
                     self.log.error('%s start_height %s  ' % (self.ip, self.start_height))
                 self.version = None
